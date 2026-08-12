@@ -1,0 +1,8 @@
+{
+  "initialVersion": "0.1.0",
+  "defaultIncrement": "patch",
+  "tagPrefix": "v",
+  "packageIds": [
+    "OnnxModelRuntime.NET"
+  ]
+}

@@ -1,0 +1,107 @@
+name: Native AOT integration
+
+on:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 7 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  aot-core:
+    name: Core AOT + ONNX smoke ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Resolve RID and publish Native AOT smoke
+        shell: pwsh
+        run: |
+          if ($IsWindows) { $rid = 'win-x64' }
+          elseif ($IsMacOS) {
+            $arch = (& uname -m).Trim()
+            $rid = if ($arch -eq 'arm64') { 'osx-arm64' } else { 'osx-x64' }
+          }
+          else { $rid = 'linux-x64' }
+          "RID=$rid" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          dotnet publish tests/OnnxModelRuntime.AotSmoke/OnnxModelRuntime.AotSmoke.csproj `
+            --configuration Release --runtime $rid -p:PublishAot=true --output artifacts/aot
+      - name: Verify ONNX Runtime native sidecar
+        shell: pwsh
+        run: |
+          $sidecar = Get-ChildItem artifacts/aot -Recurse -File | Where-Object { $_.Name -match '^(lib)?onnxruntime\.(dll|so|dylib)$' } | Select-Object -First 1
+          if (-not $sidecar) { throw "RID-specific ONNX Runtime native sidecar was not published beside the AOT bundle." }
+      - name: Run practical ONNX Runtime smoke
+        shell: pwsh
+        run: |
+          $exe = if ($IsWindows) { 'artifacts/aot/OnnxModelRuntime.AotSmoke.exe' } else { 'artifacts/aot/OnnxModelRuntime.AotSmoke' }
+          & $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  native-abi:
+    name: C ABI ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Setup MSVC
+        if: matrix.os == 'windows-latest'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Publish Native AOT shared library
+        shell: pwsh
+        run: |
+          if ($IsWindows) { $rid = 'win-x64' }
+          elseif ($IsMacOS) {
+            $arch = (& uname -m).Trim()
+            $rid = if ($arch -eq 'arm64') { 'osx-arm64' } else { 'osx-x64' }
+          }
+          else { $rid = 'linux-x64' }
+          dotnet publish src/OnnxModelRuntime.Native/OnnxModelRuntime.Native.csproj `
+            --configuration Release --runtime $rid -p:PublishAot=true -p:NativeLib=Shared --output artifacts/native
+      - name: Verify ONNX Runtime sidecar in native bundle
+        shell: pwsh
+        run: |
+          $sidecar = Get-ChildItem artifacts/native -Recurse -File | Where-Object { $_.Name -match '^(lib)?onnxruntime\.(dll|so|dylib)$' } | Select-Object -First 1
+          if (-not $sidecar) { throw "RID-specific ONNX Runtime native sidecar was not published beside the native bundle." }
+      - name: Compile standalone C consumer
+        shell: pwsh
+        run: |
+          if ($IsWindows) {
+            cl /nologo /I native/include native/smoke/c/main.c /Fe:artifacts/native/native-smoke.exe
+          }
+          elseif ($IsMacOS) {
+            cc native/smoke/c/main.c -I native/include -o artifacts/native/native-smoke
+          }
+          else {
+            cc native/smoke/c/main.c -I native/include -ldl -o artifacts/native/native-smoke
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run C ABI smoke
+        shell: pwsh
+        run: |
+          $extension = if ($IsWindows) { '.dll' } elseif ($IsMacOS) { '.dylib' } else { '.so' }
+          $library = Get-ChildItem artifacts/native -File | Where-Object { $_.Name -like "*OnnxModelRuntime.Native*$extension" } | Select-Object -First 1
+          if (-not $library) { throw "Native AOT shared library was not produced." }
+          $smoke = if ($IsWindows) { 'artifacts/native/native-smoke.exe' } else { 'artifacts/native/native-smoke' }
+          & $smoke $library.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

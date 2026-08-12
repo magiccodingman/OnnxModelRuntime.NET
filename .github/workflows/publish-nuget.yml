@@ -1,0 +1,118 @@
+name: Publish NuGet
+
+on:
+  push:
+    branches:
+      - release
+  workflow_dispatch:
+
+concurrency:
+  group: nuget-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.changes.outputs.should_release }}
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Fetch full history and tags
+        run: |
+          git fetch --unshallow || true
+          git fetch --tags --force
+      - name: Detect package-affecting changes
+        id: changes
+        shell: pwsh
+        run: ./eng/DetectPackageChanges.ps1
+      - name: Resolve next package version
+        if: steps.changes.outputs.should_release == 'true'
+        id: version
+        shell: pwsh
+        run: ./eng/ResolveReleaseVersion.ps1
+      - name: No package release required
+        if: steps.changes.outputs.should_release != 'true'
+        run: echo "No NuGet package-affecting changes were detected."
+
+  validate:
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore
+        run: dotnet restore OnnxModelRuntime.slnx
+      - name: Build
+        run: dotnet build OnnxModelRuntime.slnx --configuration Release --no-restore -p:Version=${{ needs.prepare.outputs.version }}
+      - name: Test
+        run: dotnet test tests/OnnxModelRuntime.Tests/OnnxModelRuntime.Tests.csproj --configuration Release --no-build -p:Version=${{ needs.prepare.outputs.version }}
+
+  publish:
+    needs: [prepare, validate]
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore
+        run: dotnet restore OnnxModelRuntime.slnx
+      - name: Build package
+        run: dotnet build src/OnnxModelRuntime/OnnxModelRuntime.csproj --configuration Release --no-restore -p:Version=${{ needs.prepare.outputs.version }}
+      - name: Pack exact release version
+        run: |
+          mkdir -p artifacts/nuget
+          dotnet pack src/OnnxModelRuntime/OnnxModelRuntime.csproj --configuration Release --no-build --output artifacts/nuget -p:PackageVersion=${{ needs.prepare.outputs.version }} -p:Version=${{ needs.prepare.outputs.version }}
+      - name: Validate NuGet package
+        shell: pwsh
+        run: ./eng/ValidatePackages.ps1 -Directory artifacts/nuget -Version '${{ needs.prepare.outputs.version }}'
+      - name: NuGet trusted login
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }}
+      - name: Publish package
+        shell: pwsh
+        run: |
+          Get-ChildItem artifacts/nuget -Filter '*.nupkg' | ForEach-Object {
+            dotnet nuget push $_.FullName --api-key '${{ steps.login.outputs.NUGET_API_KEY }}' --source https://api.nuget.org/v3/index.json
+            if ($LASTEXITCODE -ne 0) { throw "NuGet push failed for $($_.Name)" }
+          }
+      - name: Tag release
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "v${{ needs.prepare.outputs.version }}"
+          git push origin "v${{ needs.prepare.outputs.version }}"
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "v${{ needs.prepare.outputs.version }}" --generate-notes --title "v${{ needs.prepare.outputs.version }}"
