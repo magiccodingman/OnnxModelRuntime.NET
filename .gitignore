@@ -1,0 +1,118 @@
+**/bin/
+**/obj/
+.vs/
+.idea/
+*.user
+*.suo
+*.nupkg
+*.snupkg
+artifacts/
+TestResults/
+coverage/
+.DS_Store
+## Build results
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+[Aa]rtifacts/
+[Dd]ebug/
+[Rr]elease/
+[Dd]ebugPublic/
+[Rr]eleases/
+[Tt]est[Rr]esult*/
+[Tt]est[Rr]esults/
+coverage/
+*.coverage
+*.coveragexml
+*.trx
+*.binlog
+*.sarif
+
+## Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.VC.db
+*.VC.VC.opendb
+*.opendb
+*.dbmdl
+*.jfm
+*.pfx
+*.publishsettings
+PublishScripts/
+
+## JetBrains Rider / IntelliJ
+.idea/
+*.sln.iml
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+.idea_modules/
+
+## VS Code
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+## NuGet
+*.nupkg
+*.snupkg
+packages/
+!**/packages/build/
+*.nuget.props
+*.nuget.targets
+
+## Node / npm
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+client/dist/
+client/README.md
+client/LICENSE
+client/128x128_compressed.png
+
+## Playwright browsers and traces
+.playwright/
+playwright-report/
+test-results/
+blob-report/
+*.zip.trace
+
+## Snapshot generated artifacts
+snapshot-output.zip
+snapshot-output.zip.partial
+*.snapshot.zip
+*.snapshot.zip.partial
+snapshot-report.json
+
+## OS / editor noise
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+
+## Secrets / local configuration
+.env
+.env.*
+!.env.example
+secrets.json
+appsettings.Local.json
+appsettings.*.local.json
+
+## Temporary files
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+~$*
