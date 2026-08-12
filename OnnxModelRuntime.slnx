@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OnnxModelRuntime/OnnxModelRuntime.csproj" />
+    <Project Path="src/OnnxModelRuntime.Native/OnnxModelRuntime.Native.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OnnxModelRuntime.Tests/OnnxModelRuntime.Tests.csproj" />
+    <Project Path="tests/OnnxModelRuntime.AotSmoke/OnnxModelRuntime.AotSmoke.csproj" />
+  </Folder>
+</Solution>
