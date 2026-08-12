@@ -30,6 +30,14 @@ uint32_t omr_abi_version(void);
 - callback-owned buffers can be released with the caller's own `release_response` callback;
 - foreign callers are never required to allocate or free memory with a .NET allocator.
 
+## Shared-library lifetime
+
+Treat the Native AOT shared library itself as a **process-lifetime component**. Dynamically load it, resolve its exports, create and destroy as many `omr` runtime handles as needed, but do not call `dlclose()` / `FreeLibrary()` to unload the Native AOT library while the process continues.
+
+This is distinct from runtime-handle lifecycle: `omr_runtime_destroy` is still required and cleanly drains/disposes the runtime, model-instance callbacks, scheduler activity, and managed resources owned by that handle.
+
+The .NET Native AOT runtime is not designed as an unloadable runtime. The checked-in C smoke therefore validates dynamic loading and symbol resolution without attempting to unload the Native AOT library afterward.
+
 ## Executor callback model
 
 `omr_runtime_create` receives `omr_executor_v1`. It contains an opaque `user_data` pointer plus callbacks:
