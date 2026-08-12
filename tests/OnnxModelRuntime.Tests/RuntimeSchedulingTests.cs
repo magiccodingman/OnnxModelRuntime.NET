@@ -31,7 +31,7 @@ public sealed partial class RuntimeTests
         using var gate = new ManualResetEventSlim(false);
         var factory = new FakeFactory<int, int>((context, _) => new FakeModel<int, int>(context.InstanceIndex, (request, _) => { gate.Wait(); return request; }));
         await using var runtime = CreateRuntime(factory, modelCount: 3, concurrency: 3);
-        var tasks = Enumerable.Range(0, 5).Select(runtime.RunAsync).ToArray();
+        var tasks = Enumerable.Range(0, 5).Select(request => runtime.RunAsync(request)).ToArray();
         await WaitUntilAsync(() => factory.Models.Take(3).Sum(model => model.RunCount) == 5);
         Assert.Equal(new[] { 1, 2, 2 }, factory.Models.Take(3).Select(model => model.RunCount).Order().ToArray());
         gate.Set();
@@ -44,7 +44,7 @@ public sealed partial class RuntimeTests
         using var gate = new ManualResetEventSlim(false);
         var factory = new FakeFactory<int, int>((context, _) => new FakeModel<int, int>(context.InstanceIndex, (request, _) => { gate.Wait(); return request; }));
         await using var runtime = CreateRuntime(factory, modelCount: 1, concurrency: 3);
-        var tasks = Enumerable.Range(0, 4).Select(runtime.RunAsync).ToArray();
+        var tasks = Enumerable.Range(0, 4).Select(request => runtime.RunAsync(request)).ToArray();
         await WaitUntilAsync(() => factory.Models[0].RunCount == 3);
         Assert.Equal(3, runtime.GetRuntimeInfo().ActiveRequests);
         Assert.Equal(3, factory.Models[0].MaxObservedConcurrentExecutions);
