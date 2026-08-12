@@ -43,6 +43,17 @@ public sealed partial class RuntimeTests
         }
     }
 
+    private sealed class InvalidShapeMulModelExecutor : IOnnxModelExecutor<float[], float[]>
+    {
+        public float[] Execute(InferenceSession session, float[] request, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var input = NamedOnnxValue.CreateFromTensor("X", new DenseTensor<float>(request, new[] { 1, 6 }));
+            using var results = session.Run([input]);
+            return results.Single().AsEnumerable<float>().ToArray();
+        }
+    }
+
     private sealed class FakeFactory<TRequest, TResponse>(
         Func<OnnxModelInstanceCreationContext, CancellationToken, FakeModel<TRequest, TResponse>> create)
         : IOnnxModelInstanceFactory<TRequest, TResponse>
