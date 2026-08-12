@@ -40,7 +40,7 @@ public sealed partial class RuntimeTests
         await using var runtime = CreateRuntime(factory, modelCount: 1, concurrency: 1, classifier: TestFailureClassifier.Instance);
 
         var request = runtime.RunAsync(9);
-        await WaitUntilAsync(() => runtime.GetRuntimeInfo().Instances[0] is { Health: ModelInstanceHealth.Faulted, RecoveryAttempts: >= 1 });
+        await WaitUntilAsync(() => runtime.GetRuntimeInfo().Instances[0] is { Health: not ModelInstanceHealth.Healthy, RecoveryAttempts: >= 2 });
         Assert.Equal(0, runtime.GetRuntimeInfo().HealthyModelInstanceCount);
         Assert.Equal(9, await request);
         await WaitUntilAsync(() => runtime.GetRuntimeInfo().Instances[0] is { Health: ModelInstanceHealth.Healthy, Generation: 2 });
