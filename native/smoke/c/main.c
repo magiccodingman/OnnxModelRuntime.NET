@@ -8,13 +8,11 @@
 typedef HMODULE library_handle;
 static library_handle open_library(const char* path) { return LoadLibraryA(path); }
 static void* load_symbol(library_handle lib, const char* name) { return (void*)GetProcAddress(lib, name); }
-static void close_library(library_handle lib) { if (lib) FreeLibrary(lib); }
 #else
 #include <dlfcn.h>
 typedef void* library_handle;
 static library_handle open_library(const char* path) { return dlopen(path, RTLD_NOW | RTLD_LOCAL); }
 static void* load_symbol(library_handle lib, const char* name) { return dlsym(lib, name); }
-static void close_library(library_handle lib) { if (lib) dlclose(lib); }
 #endif
 
 typedef uint32_t (OMR_CALL *abi_version_fn)(void);
@@ -85,7 +83,7 @@ static void OMR_CALL release_response(void* instance_context, const uint8_t* dat
 
 #define LOAD_REQUIRED(target, type, name) do { \
     target = (type)load_symbol(lib, name); \
-    if (!(target)) { fprintf(stderr, "missing symbol: %s\n", name); close_library(lib); return 3; } \
+    if (!(target)) { fprintf(stderr, "missing symbol: %s\n", name); return 3; } \
 } while (0)
 
 int main(int argc, char** argv) {
@@ -120,7 +118,6 @@ int main(int argc, char** argv) {
 
     if (abi_version() != OMR_ABI_VERSION) {
         fprintf(stderr, "ABI version mismatch\n");
-        close_library(lib);
         return 4;
     }
 
@@ -147,7 +144,6 @@ int main(int argc, char** argv) {
     int32_t status = runtime_create(&options, &executor, &handle);
     if (status != OMR_OK || handle == 0) {
         fprintf(stderr, "runtime_create failed: %d\n", status);
-        close_library(lib);
         return 5;
     }
 
@@ -155,7 +151,6 @@ int main(int argc, char** argv) {
     if (get_instance_count(handle, &count) != OMR_OK || count != 1) {
         fprintf(stderr, "unexpected instance count\n");
         runtime_destroy(handle);
-        close_library(lib);
         return 6;
     }
 
@@ -166,7 +161,6 @@ int main(int argc, char** argv) {
     if (get_instance_info(handle, 0, &info) != OMR_OK || info.health != OMR_INSTANCE_HEALTHY || info.generation != 1) {
         fprintf(stderr, "unexpected instance diagnostics\n");
         runtime_destroy(handle);
-        close_library(lib);
         return 7;
     }
 
@@ -177,14 +171,12 @@ int main(int argc, char** argv) {
         fprintf(stderr, "execute/echo failed: %d\n", status);
         buffer_free(&output);
         runtime_destroy(handle);
-        close_library(lib);
         return 8;
     }
     buffer_free(&output);
     if (output.data != NULL || output.length != 0) {
         fprintf(stderr, "buffer_free did not clear ownership structure\n");
         runtime_destroy(handle);
-        close_library(lib);
         return 9;
     }
 
@@ -197,20 +189,17 @@ int main(int argc, char** argv) {
         info.total_recoveries != 1) {
         fprintf(stderr, "native recovery diagnostics were unexpected\n");
         runtime_destroy(handle);
-        close_library(lib);
         return 10;
     }
 
     if (runtime_destroy(handle) != OMR_OK) {
         fprintf(stderr, "runtime_destroy failed\n");
-        close_library(lib);
         return 11;
     }
 
     status = get_instance_count(handle, &count);
     if (status != OMR_INVALID_HANDLE) {
         fprintf(stderr, "invalid-handle error mapping failed: %d\n", status);
-        close_library(lib);
         return 12;
     }
 
@@ -218,19 +207,17 @@ int main(int argc, char** argv) {
     status = get_last_error(NULL, 0, &required);
     if (status != OMR_BUFFER_TOO_SMALL || required == 0) {
         fprintf(stderr, "last-error size discovery failed: %d\n", status);
-        close_library(lib);
         return 13;
     }
     uint8_t* error = (uint8_t*)calloc(required + 1, 1);
     if (!error || get_last_error(error, required, &required) != OMR_OK) {
         fprintf(stderr, "last-error retrieval failed\n");
         free(error);
-        close_library(lib);
         return 14;
     }
     free(error);
 
-    close_library(lib);
+    /* Native AOT shared libraries are process-lifetime components; destroy runtime handles, but do not unload the library. */
     printf("native ABI smoke passed\n");
     return 0;
 }
