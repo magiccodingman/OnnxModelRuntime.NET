@@ -189,10 +189,14 @@ public sealed partial class OnnxModelRuntime<TRequest, TResponse>
 
     public async ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
-            return;
+        lock (_gate)
+        {
+            if (_disposeStarted != 0)
+                return;
+            Volatile.Write(ref _disposeStarted, 1);
+            _channel.Writer.TryComplete();
+        }
 
-        _channel.Writer.TryComplete();
         _shutdown.Cancel();
         SignalCapacityChanged();
 

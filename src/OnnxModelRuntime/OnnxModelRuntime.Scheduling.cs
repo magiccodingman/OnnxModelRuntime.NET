@@ -23,6 +23,13 @@ public sealed partial class OnnxModelRuntime<TRequest, TResponse>
                 ModelInstance? instance;
                 while ((instance = TryReserveLeastLoaded()) is null)
                 {
+                    if (IsDisposed)
+                    {
+                        work.Completion.TrySetException(new ObjectDisposedException(nameof(OnnxModelRuntime<TRequest, TResponse>)));
+                        pending = null;
+                        break;
+                    }
+
                     if (AllInstancesPermanentlyUnavailable())
                     {
                         work.Completion.TrySetException(new OnnxModelExecutionException(
@@ -89,6 +96,9 @@ public sealed partial class OnnxModelRuntime<TRequest, TResponse>
     {
         lock (_gate)
         {
+            if (_disposeStarted != 0)
+                return null;
+
             var minimum = int.MaxValue;
             foreach (var instance in _instances)
             {
