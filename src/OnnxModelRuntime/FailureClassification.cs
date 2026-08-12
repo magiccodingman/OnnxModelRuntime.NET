@@ -25,12 +25,25 @@ public sealed class OnnxRuntimeFailureClassifier : IInferenceFailureClassifier
         ArgumentNullException.ThrowIfNull(exception);
         if (exception is OutOfMemoryException)
             return InferenceFailureKind.MemoryPressure;
-        if (exception is OnnxRuntimeException onnx)
-            return LooksLikeMemoryPressure(onnx)
-                ? InferenceFailureKind.MemoryPressure
-                : InferenceFailureKind.RecoverableInstance;
-        return InferenceFailureKind.Application;
+        if (exception is not OnnxRuntimeException onnx)
+            return InferenceFailureKind.Application;
+        if (LooksLikeMemoryPressure(onnx))
+            return InferenceFailureKind.MemoryPressure;
+        if (HasOnnxErrorCode(onnx, "InvalidArgument"))
+            return InferenceFailureKind.Application;
+        if (HasOnnxErrorCode(onnx, "NoSuchFile") ||
+            HasOnnxErrorCode(onnx, "NoModel") ||
+            HasOnnxErrorCode(onnx, "InvalidProtobuf") ||
+            HasOnnxErrorCode(onnx, "NotImplemented") ||
+            HasOnnxErrorCode(onnx, "InvalidGraph") ||
+            HasOnnxErrorCode(onnx, "ShapeInferenceNotRegistered") ||
+            HasOnnxErrorCode(onnx, "RequirementNotRegistered"))
+            return InferenceFailureKind.Fatal;
+        return InferenceFailureKind.RecoverableInstance;
     }
+
+    private static bool HasOnnxErrorCode(OnnxRuntimeException exception, string errorCode) =>
+        exception.Message.StartsWith($"[ErrorCode:{errorCode}]", StringComparison.OrdinalIgnoreCase);
 
     private static bool LooksLikeMemoryPressure(Exception exception)
     {
