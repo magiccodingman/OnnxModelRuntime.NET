@@ -1,4 +1,9 @@
+using System.Collections.Concurrent;
+using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.Tensors;
+
 namespace OnnxModelRuntime.Tests;
+
 
 public sealed partial class RuntimeTests
 {
@@ -104,9 +109,14 @@ public sealed partial class RuntimeTests
         var runtime = CreateRuntime(factory, modelCount: 2, concurrency: 1, queueCapacity: 1, classifier: TestFailureClassifier.Instance);
 
         var first = runtime.RunAsync(1);
-        await WaitUntilAsync(() => runtime.GetRuntimeInfo().Instances[0].Health != ModelInstanceHealth.Healthy);
+        await WaitUntilAsync(() =>
+        {
+            var info = runtime.GetRuntimeInfo();
+            return info.Instances[0].Health != ModelInstanceHealth.Healthy && info.Instances[1].ActiveRequests == 1;
+        });
         var queued = runtime.RunAsync(2);
         await Task.Delay(50);
+        Assert.False(queued.IsCompleted);
 
         var dispose = runtime.DisposeAsync().AsTask();
         executionGate.Set();
@@ -116,6 +126,7 @@ public sealed partial class RuntimeTests
         Assert.All(factory.Models, model => Assert.Equal(1, model.DisposeCount));
         Assert.All(runtime.GetRuntimeInfo().Instances, instance => Assert.Equal(ModelInstanceHealth.Disposed, instance.Health));
         await Assert.ThrowsAsync<ObjectDisposedException>(() => queued);
-        try { await first; } catch { }
+        Assert.Equal(1, await first);
     }
+
 }
