@@ -62,6 +62,25 @@ public sealed partial class RuntimeTests
     }
 
     [Fact]
+    public async Task OnnxInvalidArgument_DoesNotTriggerSessionReconstruction()
+    {
+        var modelPath = Path.Combine(AppContext.BaseDirectory, "assets", "mul_1.onnx");
+        await using var runtime = new global::OnnxModelRuntime.OnnxModelRuntime<float[], float[]>(
+            modelPath,
+            new InvalidShapeMulModelExecutor(),
+            new OnnxModelRuntimeOptions { ModelInstanceCount = 1, ThreadsPerModel = 1, ConcurrentRequestsPerModel = 1, QueueCapacity = 8 });
+
+        await Assert.ThrowsAsync<Microsoft.ML.OnnxRuntime.OnnxRuntimeException>(() =>
+            runtime.RunAsync([1f, 1f, 1f, 1f, 1f, 1f]));
+
+        await Task.Delay(100);
+        var info = runtime.GetRuntimeInfo().Instances[0];
+        Assert.Equal(ModelInstanceHealth.Healthy, info.Health);
+        Assert.Equal(1, info.Generation);
+        Assert.Equal(0, info.TotalRecoveries);
+    }
+
+    [Fact]
     public async Task RuntimeWorksWithNonEmbeddingRequestAndResponseTypes()
     {
         var factory = new FakeFactory<ClassificationInput, ClassificationResult>((context, _) =>
