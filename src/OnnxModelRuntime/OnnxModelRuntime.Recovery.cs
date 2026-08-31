@@ -12,17 +12,24 @@ public sealed partial class OnnxModelRuntime<TRequest, TResponse>
             {
                 instance.Health = ModelInstanceHealth.Draining;
                 instance.PermanentlyFaulted = false;
+                instance.MemoryPressureRecovery = memoryPressure;
                 instance.Drained = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                 if (instance.ActiveRequests == 0)
                     instance.Drained.TrySetResult(true);
                 start = true;
+            }
+            else if (instance.Health == ModelInstanceHealth.Draining && memoryPressure && !IsDisposed)
+            {
+                // Multiple requests can fail against the same still-active generation.
+                // Memory-pressure recovery must dominate an earlier ordinary rebuild.
+                instance.MemoryPressureRecovery = true;
             }
         }
 
         if (!start)
             return;
 
-        var task = RecoverInstanceAsync(instance, memoryPressure, _shutdown.Token);
+        var task = RecoverInstanceAsync(instance, _shutdown.Token);
         lock (_gate)
             instance.RecoveryTask = task;
         _ = ObserveLifecycleTaskAsync(task);
@@ -43,6 +50,12 @@ public sealed partial class OnnxModelRuntime<TRequest, TResponse>
                     instance.Drained.TrySetResult(true);
                 start = true;
             }
+            else if (instance.Health == ModelInstanceHealth.Draining && !IsDisposed)
+            {
+                // A later fatal failure from the same generation must dominate an
+                // earlier recoverable or memory-pressure transition.
+                instance.PermanentlyFaulted = true;
+            }
         }
 
         if (!start)
@@ -61,7 +74,7 @@ public sealed partial class OnnxModelRuntime<TRequest, TResponse>
         catch { }
     }
 
-    private async Task RecoverInstanceAsync(ModelInstance instance, bool memoryPressure, CancellationToken cancellationToken)
+    private async Task RecoverInstanceAsync(ModelInstance instance, CancellationToken cancellationToken)
     {
         Task drainedTask;
         lock (_gate)
@@ -69,13 +82,27 @@ public sealed partial class OnnxModelRuntime<TRequest, TResponse>
         await drainedTask.WaitAsync(cancellationToken).ConfigureAwait(false);
 
         IOnnxModelInstance<TRequest, TResponse>? oldModel;
+        bool permanentlyFaulted;
+        bool memoryPressure;
         lock (_gate)
         {
-            instance.Health = ModelInstanceHealth.Recovering;
+            permanentlyFaulted = instance.PermanentlyFaulted;
+            memoryPressure = instance.MemoryPressureRecovery;
+            instance.Health = permanentlyFaulted
+                ? ModelInstanceHealth.Faulted
+                : ModelInstanceHealth.Recovering;
             oldModel = instance.Model;
             instance.Model = null;
+            if (permanentlyFaulted)
+                instance.RecoveryAttempts = 0;
         }
         TryDispose(oldModel);
+
+        if (permanentlyFaulted)
+        {
+            SignalCapacityChanged();
+            return;
+        }
 
         var attempt = 0;
         while (!cancellationToken.IsCancellationRequested)
@@ -113,6 +140,7 @@ public sealed partial class OnnxModelRuntime<TRequest, TResponse>
                     instance.Model = fresh;
                     instance.Health = ModelInstanceHealth.Healthy;
                     instance.PermanentlyFaulted = false;
+                    instance.MemoryPressureRecovery = false;
                     instance.Generation = generation;
                     instance.TotalRecoveries++;
                     instance.RecoveryAttempts = 0;
