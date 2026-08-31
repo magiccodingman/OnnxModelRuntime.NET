@@ -214,6 +214,8 @@ Failures are classified as one of:
 
 The default `OnnxRuntimeFailureClassifier` treats ordinary `OnnxRuntimeException` failures as recoverable and recognizes common ONNX allocation/OOM messages plus `OutOfMemoryException` as memory pressure.
 
+Because multiple calls can still be active against a generation after its first failure begins draining, concurrent failures are combined by severity (`Fatal` > `MemoryPressure` > `RecoverableInstance`). A later fatal failure prevents reconstruction, and later memory pressure upgrades an ordinary rebuild to use the pressure-release delay. The lifecycle result is therefore independent of which unhealthy request reports first.
+
 Consumers can replace the classifier when a particular model adapter has additional failure semantics.
 
 The OOM rule is intentional: if one loaded copy has just failed an allocation, immediately throwing the same request at another loaded copy can turn local memory pressure into cascading failures.

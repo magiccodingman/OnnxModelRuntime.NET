@@ -32,6 +32,7 @@ public sealed partial class OnnxModelRuntime<TRequest, TResponse> : IAsyncDispos
         public TaskCompletionSource<bool>? Drained { get; set; }
         public Task? RecoveryTask { get; set; }
         public bool PermanentlyFaulted { get; set; }
+        public bool MemoryPressureRecovery { get; set; }
     }
 
     private readonly Channel<WorkItem> _channel;

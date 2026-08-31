@@ -63,6 +63,92 @@ public sealed partial class RuntimeTests
     }
 
     [Fact]
+    public async Task ConcurrentFatalFailure_DominatesEarlierRecoverableTransitionFromSameGeneration()
+    {
+        using var fatalEntered = new ManualResetEventSlim(false);
+        using var releaseFatal = new ManualResetEventSlim(false);
+        var factory = new FakeFactory<int, int>((context, _) => new FakeModel<int, int>(context.InstanceIndex, (request, _) =>
+        {
+            if (context.Generation > 1)
+                return request;
+            if (request == 1)
+            {
+                fatalEntered.Set();
+                releaseFatal.Wait();
+                throw new FatalTestException("fatal generation state");
+            }
+            throw new RecoverableTestException("recoverable generation state");
+        }));
+        await using var runtime = CreateRuntime(
+            factory,
+            modelCount: 1,
+            concurrency: 2,
+            classifier: TestFailureClassifier.Instance);
+
+        var fatal = runtime.RunAsync(1);
+        Assert.True(fatalEntered.Wait(TimeSpan.FromSeconds(5)));
+        var recoverable = runtime.RunAsync(2);
+        await WaitUntilAsync(() => runtime.GetRuntimeInfo().Instances[0] is
+        {
+            Health: ModelInstanceHealth.Draining,
+            ActiveRequests: 1
+        });
+
+        releaseFatal.Set();
+        var fatalError = await Assert.ThrowsAsync<OnnxModelExecutionException>(() => fatal);
+        Assert.Equal(InferenceFailureKind.Fatal, fatalError.FailureKind);
+        var retryError = await Assert.ThrowsAsync<OnnxModelExecutionException>(() => recoverable);
+        Assert.Equal(InferenceFailureKind.Fatal, retryError.FailureKind);
+        await WaitUntilAsync(() => runtime.GetRuntimeInfo().Instances[0].Health == ModelInstanceHealth.Faulted);
+
+        Assert.Equal(1, factory.CreateCount);
+        Assert.Equal(0, runtime.GetRuntimeInfo().HealthyModelInstanceCount);
+    }
+
+    [Fact]
+    public async Task ConcurrentMemoryPressure_EscalatesEarlierOrdinaryRecoveryDelay()
+    {
+        using var memoryEntered = new ManualResetEventSlim(false);
+        using var releaseMemory = new ManualResetEventSlim(false);
+        var factory = new FakeFactory<int, int>((context, _) => new FakeModel<int, int>(context.InstanceIndex, (request, _) =>
+        {
+            if (context.Generation > 1)
+                return request;
+            if (request == 1)
+            {
+                memoryEntered.Set();
+                releaseMemory.Wait();
+                throw new MemoryPressureTestException("memory pressure");
+            }
+            throw new RecoverableTestException("ordinary recovery");
+        }));
+        await using var runtime = CreateRuntime(
+            factory,
+            modelCount: 1,
+            concurrency: 2,
+            classifier: TestFailureClassifier.Instance);
+
+        var memory = runtime.RunAsync(1);
+        Assert.True(memoryEntered.Wait(TimeSpan.FromSeconds(5)));
+        var recoverable = runtime.RunAsync(2);
+        await WaitUntilAsync(() => runtime.GetRuntimeInfo().Instances[0] is
+        {
+            Health: ModelInstanceHealth.Draining,
+            ActiveRequests: 1
+        });
+
+        releaseMemory.Set();
+        var memoryError = await Assert.ThrowsAsync<OnnxModelExecutionException>(() => memory);
+        Assert.Equal(InferenceFailureKind.MemoryPressure, memoryError.FailureKind);
+        await Task.Delay(200);
+        Assert.Equal(1, factory.CreateCount);
+        Assert.False(recoverable.IsCompleted);
+
+        Assert.Equal(2, await recoverable);
+        Assert.Equal(2, factory.CreateCount);
+    }
+
+    [Fact]
     public void PartialStartupFailure_DisposesAlreadyCreatedInstances()
     {
         FakeModel<int, int>? first = null;

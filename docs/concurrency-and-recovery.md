@@ -95,6 +95,16 @@ The instance remains unavailable during all recreation failures. Merely waiting 
 
 The first recreation attempt after an ordinary recoverable failure has no artificial delay. Subsequent failures use bounded exponential backoff beginning at 250 ms and capped at 10 seconds.
 
+### Concurrent failure severity
+
+More than one request can still be active against the generation that has just entered `Draining`. Their failures are combined by severity rather than by arrival order:
+
+```text
+Fatal > MemoryPressure > RecoverableInstance
+```
+
+A later fatal failure permanently faults the generation even if an earlier request already began ordinary recovery. A later memory-pressure failure upgrades an ordinary recovery to use the pressure-release delay. This makes the final lifecycle decision describe the most severe observed failure from that generation; the first request to report a failure does not accidentally win a race. `Application` failures remain per-request errors and do not participate in the unhealthy transition.
+
 ## Request retry
 
 A request that encountered `RecoverableInstance` is re-enqueued through the global scheduler at most once.
